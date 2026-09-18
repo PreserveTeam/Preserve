@@ -1,0 +1,33 @@
+[package]
+name = "preserve"
+version = "0.20260919.2"
+edition = "2024"
+description = "Native Windows game preservation installer"
+build = "build.rs"
+
+[dependencies]
+anyhow = "1.0"
+directories = "6.0"
+futures-util = "0.3"
+eframe = { version = "0.36.1", default-features = false, features = ["default_fonts", "glow"] }
+hex = "0.4"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "rustls-tls"] }
+rfd = "0.15"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+sha2 = "0.10"
+tokio = { version = "1.47", features = ["fs", "io-util", "macros", "process", "rt-multi-thread", "time"] }
+url = "2.5"
+uuid = { version = "1.18", features = ["v4"] }
+
+[target.'cfg(windows)'.dependencies]
+winreg = "0.55"
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging"] }
+
+[target.'cfg(windows)'.build-dependencies]
+winres = "0.1"
+
+[profile.release]
+lto = "thin"
+strip = true
