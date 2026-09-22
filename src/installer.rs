@@ -453,7 +453,7 @@ async fn run_prerequisite(prerequisite: &Prerequisite, file: &Path, target: &Pat
                 .split_ascii_whitespace()
                 .map(str::to_string),
         );
-        ensure_success(
+        ensure_msi_success(
             Command::new("msiexec.exe").args(args).status().await?,
             &prerequisite.name,
         )?;
@@ -474,6 +474,19 @@ fn ensure_success(status: std::process::ExitStatus, name: &str) -> Result<()> {
         Ok(())
     } else {
         bail!("{} failed with {}", name, status)
+    }
+}
+
+/// msiexec-specific success check. Beyond exit code 0, treats
+/// ERROR_SUCCESS_REBOOT_REQUIRED (3010) and ERROR_PRODUCT_VERSION (1638,
+/// "another version of this product is already installed") as success:
+/// both mean a compatible redistributable is already present on the
+/// machine, which is the common case for shared runtimes like the VC++
+/// redistributable.
+fn ensure_msi_success(status: std::process::ExitStatus, name: &str) -> Result<()> {
+    match status.code() {
+        Some(0) | Some(1638) | Some(3010) => Ok(()),
+        _ => bail!("{} failed with {}", name, status),
     }
 }
 

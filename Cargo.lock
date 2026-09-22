@@ -2299,7 +2299,7 @@ dependencies = [
 
 [[package]]
 name = "preserve"
-version = "0.20260919.2"
+version = "0.20260922.6"
 dependencies = [
  "anyhow",
  "directories",

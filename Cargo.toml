@@ -1,6 +1,6 @@
 [package]
 name = "preserve"
-version = "0.20260919.2"
+version = "0.20260922.6"
 edition = "2024"
 description = "Native Windows game preservation installer"
 build = "build.rs"
