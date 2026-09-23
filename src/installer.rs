@@ -453,12 +453,15 @@ async fn run_prerequisite(prerequisite: &Prerequisite, file: &Path, target: &Pat
                 .split_ascii_whitespace()
                 .map(str::to_string),
         );
-        ensure_msi_success(
+        ensure_installer_success(
             Command::new("msiexec.exe").args(args).status().await?,
             &prerequisite.name,
         )?;
     } else {
-        ensure_success(
+        // Redistributable bootstrapper EXEs (VC++, .NET) wrap an internal
+        // MSI install and forward its exit code, so they can also return
+        // the MSI-specific "already installed" / "reboot required" codes.
+        ensure_installer_success(
             Command::new(file)
                 .args(prerequisite.args.split_ascii_whitespace())
                 .status()
@@ -477,15 +480,18 @@ fn ensure_success(status: std::process::ExitStatus, name: &str) -> Result<()> {
     }
 }
 
-/// msiexec-specific success check. Beyond exit code 0, treats
-/// ERROR_SUCCESS_REBOOT_REQUIRED (3010) and ERROR_PRODUCT_VERSION (1638,
-/// "another version of this product is already installed") as success:
-/// both mean a compatible redistributable is already present on the
-/// machine, which is the common case for shared runtimes like the VC++
-/// redistributable.
-fn ensure_msi_success(status: std::process::ExitStatus, name: &str) -> Result<()> {
+/// Success check for MSI-backed installers (raw .msi via msiexec, and EXE
+/// bootstrappers like the VC++ and .NET redistributables that wrap one).
+/// Beyond exit code 0, treats these codes as success:
+/// - 3010 (ERROR_SUCCESS_REBOOT_REQUIRED)
+/// - 1638 (ERROR_PRODUCT_VERSION: another version of this product is
+///   already installed)
+/// - 5100 (bootstrapper StopBlock: most commonly hit when a
+///   same-or-newer runtime is already present, which is the "already
+///   satisfied" case for shared runtimes like the VC++ redistributable)
+fn ensure_installer_success(status: std::process::ExitStatus, name: &str) -> Result<()> {
     match status.code() {
-        Some(0) | Some(1638) | Some(3010) => Ok(()),
+        Some(0) | Some(1638) | Some(3010) | Some(5100) => Ok(()),
         _ => bail!("{} failed with {}", name, status),
     }
 }

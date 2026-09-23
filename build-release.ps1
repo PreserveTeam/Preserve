@@ -1,5 +1,6 @@
 param(
-  [switch]$Locked
+  [switch]$Locked,
+  [string]$Version
 )
 
 $ErrorActionPreference = "Stop"
@@ -15,6 +16,7 @@ if ($env:CARGO_HOME) {
 }
 
 $previousEncodedFlags = $env:CARGO_ENCODED_RUSTFLAGS
+$previousAppVersion = $env:PRESERVE_APP_VERSION
 try {
   $separator = [char]0x1f
   $encoded = $remaps -join $separator
@@ -22,6 +24,7 @@ try {
     $encoded = "$previousEncodedFlags$separator$encoded"
   }
   $env:CARGO_ENCODED_RUSTFLAGS = $encoded
+  if ($Version) { $env:PRESERVE_APP_VERSION = $Version }
 
   $arguments = @("build", "--release", "--manifest-path", (Join-Path $repository "Cargo.toml"))
   if ($Locked) { $arguments += "--locked" }
@@ -34,7 +37,7 @@ try {
     Where-Object { $_ } |
     Select-Object -Unique
   foreach ($path in $forbiddenPaths) {
-    if ($binaryText.Contains($path, [StringComparison]::OrdinalIgnoreCase)) {
+    if ($binaryText.IndexOf($path, [StringComparison]::OrdinalIgnoreCase) -ge 0) {
       throw "Release executable contains a local build path."
     }
   }
@@ -43,4 +46,5 @@ try {
   }
 } finally {
   $env:CARGO_ENCODED_RUSTFLAGS = $previousEncodedFlags
+  $env:PRESERVE_APP_VERSION = $previousAppVersion
 }

@@ -33,6 +33,46 @@ const ICON: &[u8] = include_bytes!("../assets/preserve.png");
 const DM_SANS: &[u8] = include_bytes!("../assets/DMSans.ttf");
 const MANROPE: &[u8] = include_bytes!("../assets/Manrope.ttf");
 
+/// Baked in at build time by build-release.ps1 (PRESERVE_APP_VERSION),
+/// falling back to the crate version for local/dev builds.
+const APP_VERSION: &str = match option_env!("PRESERVE_APP_VERSION") {
+    Some(version) => version,
+    None => env!("CARGO_PKG_VERSION"),
+};
+
+#[derive(serde::Deserialize)]
+struct VersionInfo {
+    version: String,
+}
+
+/// Compares dotted numeric version strings component-wise (e.g. the
+/// "0.YYYYMMDD.N" scheme used for releases), missing trailing components
+/// treated as 0. Returns true only if `remote` is strictly newer.
+fn version_is_newer(remote: &str, local: &str) -> bool {
+    fn parts(version: &str) -> Vec<u64> {
+        version.split('.').map(|p| p.parse().unwrap_or(0)).collect()
+    }
+    let (remote, local) = (parts(remote), parts(local));
+    for index in 0..remote.len().max(local.len()) {
+        let remote_part = remote.get(index).copied().unwrap_or(0);
+        let local_part = local.get(index).copied().unwrap_or(0);
+        if remote_part != local_part {
+            return remote_part > local_part;
+        }
+    }
+    false
+}
+
+#[cfg(windows)]
+fn open_url(url: &str) {
+    let _ = std::process::Command::new("cmd")
+        .args(["/C", "start", "", url])
+        .spawn();
+}
+
+#[cfg(not(windows))]
+fn open_url(_url: &str) {}
+
 enum Event {
     Catalog(Result<Vec<Game>, String>),
     Cover(String, Vec<u8>),
@@ -40,6 +80,7 @@ enum Event {
     Stopped(String, String, bool),
     Finished(String),
     CleanupFinished(String, Result<(), String>),
+    UpdateAvailable(String),
 }
 
 struct DownloadTask {
@@ -127,6 +168,7 @@ fn lock_native_window() {}
 struct PreserveApp {
     runtime: Arc<tokio::runtime::Runtime>,
     api_url: String,
+    update_url: String,
     tx: Sender<Event>,
     rx: Receiver<Event>,
     games: Vec<Game>,
@@ -140,6 +182,7 @@ struct PreserveApp {
     message: String,
     covers: HashMap<String, TextureHandle>,
     mark: TextureHandle,
+    latest_version: Option<String>,
 }
 
 impl PreserveApp {
@@ -156,9 +199,14 @@ impl PreserveApp {
         let default_api_url = option_env!("PRESERVE_API_URL").unwrap_or("https://preserve.st/api");
         let api_url =
             std::env::var("PRESERVE_API_URL").unwrap_or_else(|_| default_api_url.to_string());
+        let default_update_url = option_env!("PRESERVE_UPDATE_URL")
+            .unwrap_or("https://preserve.st/downloads/version.json");
+        let update_url = std::env::var("PRESERVE_UPDATE_URL")
+            .unwrap_or_else(|_| default_update_url.to_string());
         let app = Self {
             runtime,
             api_url,
+            update_url,
             tx,
             rx,
             games: Vec::new(),
@@ -172,9 +220,24 @@ impl PreserveApp {
             message: "Loading catalog…".into(),
             covers: HashMap::new(),
             mark,
+            latest_version: None,
         };
         app.load_catalog();
+        app.check_for_update();
         app
+    }
+
+    fn check_for_update(&self) {
+        let tx = self.tx.clone();
+        let update_url = self.update_url.clone();
+        self.runtime.spawn(async move {
+            if let Ok(response) = reqwest::get(update_url).await
+                && let Ok(info) = response.json::<VersionInfo>().await
+                && version_is_newer(&info.version, APP_VERSION)
+            {
+                let _ = tx.send(Event::UpdateAvailable(info.version));
+            }
+        });
     }
 
     fn load_catalog(&self) {
@@ -265,6 +328,9 @@ impl PreserveApp {
                         self.message =
                             format!("Could not clear {game_id}'s download directory: {error}");
                     }
+                }
+                Event::UpdateAvailable(version) => {
+                    self.latest_version = Some(version);
                 }
             }
         }
@@ -543,6 +609,31 @@ impl eframe::App for PreserveApp {
                 }
             }
         }
+
+        egui::Area::new(egui::Id::new("version-footer"))
+            .anchor(egui::Align2::LEFT_BOTTOM, Vec2::new(14.0, -10.0))
+            .show(&ctx, |ui| {
+                ui.horizontal(|ui| {
+                    ui.label(
+                        RichText::new(format!("v{APP_VERSION}"))
+                            .size(10.0)
+                            .color(MUTED),
+                    );
+                    if let Some(latest) = &self.latest_version {
+                        ui.add_space(8.0);
+                        if ui
+                            .link(
+                                RichText::new(format!("Update to v{latest} available"))
+                                    .size(10.0)
+                                    .color(LIME),
+                            )
+                            .clicked()
+                        {
+                            open_url("https://preserve.st");
+                        }
+                    }
+                });
+            });
     }
 }
 
